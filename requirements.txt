@@ -1,0 +1,11 @@
+langchain
+python-dotenv
+tavily-python 
+wikipedia
+arxiv 
+streamlit
+uvicorn
+fastapi
+langchain-groq
+langchain-tavily
+langgraph-checkpoint-sqlite
