@@ -49,16 +49,17 @@ Be concise but thorough. Always cite sources when available.
 """
 # ==================== Create Nodes =====================
 
-def create_agent_node(tools:list):
+def create_agent_node(tools:list, groq_api_key: str = None):
     """Factory function to create a agent node with given tools.
     args : tools : list : list of tool instances to provide to agent
+           groq_api_key : optional runtime key; falls back to GROQ_API_KEY env var
     return : function : node function that can be added to graph
     """
     
     llm = ChatGroq(
             model="llama-3.3-70b-versatile",  # Fast, high-quality model
             temperature=0,  # Deterministic responses
-            api_key=os.getenv("GROQ_API_KEY"),
+            api_key=groq_api_key or os.getenv("GROQ_API_KEY"),
             
         )
     llm_with_tools = llm.bind_tools(tools)
@@ -129,18 +130,30 @@ def create_graph():
 
 # ==================== Create Graph with Persistence =====================
 
-def create_graph_with_persistence(db_path: str = "data/checkpoints.db"):
-    """Create agent graph with SQLite persistence enabled."""
+def create_graph_with_persistence(
+    db_path: str = "data/checkpoints.db",
+    groq_api_key: str = None,
+    tavily_api_key: str = None,
+):
+    """Create agent graph with SQLite persistence enabled.
+    groq_api_key / tavily_api_key: optional runtime keys;
+    fall back to env vars when not provided (local dev with .env).
+    """
     from src.persistance.checkpointer import get_checkpointer
     from src.tools.tavily_tool import get_tavily_tool
     from src.tools.arxiv_tool import get_arxiv_tool
     from src.tools.wikipedia_tool import get_wikipedia_tool
     from src.tools.calculator_tool import calculator
     
-    tools = [get_tavily_tool(), get_arxiv_tool(), get_wikipedia_tool(), calculator]
+    tools = [
+        get_tavily_tool(api_key=tavily_api_key),
+        get_arxiv_tool(),
+        get_wikipedia_tool(),
+        calculator,
+    ]
     graph_builder = StateGraph(AgentState)
     
-    graph_builder.add_node('agent', create_agent_node(tools))
+    graph_builder.add_node('agent', create_agent_node(tools, groq_api_key=groq_api_key))
     graph_builder.add_node("tools", ToolNode(tools))
     graph_builder.add_edge(START, 'agent')
     graph_builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})

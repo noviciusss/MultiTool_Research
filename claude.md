@@ -3,8 +3,8 @@
 > **Purpose:** This file provides complete project context for AI assistants (Claude, GPT, etc.) in future sessions. Read this first before touching any code.
 
 **Last Updated:** February 20, 2026
-**Current Phase:** Phase 3 Complete → Phase 4 (Streamlit UI) is next
-**Project Status:** Core agent functional, all tools working, SQLite persistence working, UI is empty
+**Current Phase:** Phase 4 Complete → Phase 5 (Deployment) is next
+**Project Status:** Core agent functional, all tools working, SQLite persistence working, Streamlit UI working with user-provided API keys
 
 ---
 
@@ -216,10 +216,16 @@ ArXiv and Wikipedia need no keys.
 - Thread IDs are UUID4 strings
 - Config pattern: `{"configurable": {"thread_id": "..."}}`
 
-### Phase 4 — Streamlit UI ⏳ (Next)
-- `src/ui/streamlit.py` is empty
-- `run.py` is empty
-- Needs: chat interface, thread sidebar, streaming display
+### Phase 4 — Streamlit UI ✅
+- Chat interface, sidebar, thread management
+- `@st.cache_resource(groq_key, tavily_key)` — separate graph per user key pair
+- `st.stop()` gates chat behind key entry — users provide their own API keys
+- Streaming tool call progress display
+
+### Phase 5 — Deployment ⏳ (Next)
+- Target: Streamlit Community Cloud (free)
+- SQLite works locally; swap to PostgreSQL (`PostgresSaver`) for cloud
+- Users bring their own keys — no secrets needed in the repo
 
 ---
 

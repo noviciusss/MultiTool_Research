@@ -8,9 +8,10 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-def get_tavily_tool():
+def get_tavily_tool(api_key: str = None):
     '''
-    Create a tavily web seach tool 
+    Create a tavily web seach tool.
+    api_key: optional runtime key; falls back to TAVILY_API_KEY env var.
     return : TavilySearch:configured search tool
     '''
     return TavilySearch(
@@ -18,7 +19,7 @@ def get_tavily_tool():
         search_depth = 'basic', # we have option of advanded serach -->slow but comprehensive
         include_answer = True, #include direct answer in response if available
         include_raw_response = False, #Dont include full html 
-        api_keys = os.getenv("TAVILY_API_KEY")
+        tavily_api_key = api_key or os.getenv("TAVILY_API_KEY")
     )
     
 if __name__ == "__main__":

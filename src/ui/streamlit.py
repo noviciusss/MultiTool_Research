@@ -1,5 +1,7 @@
+import os
 import streamlit as st
 import uuid
+from dotenv import load_dotenv
 
 from src.agent.graph import create_graph_with_persistence
 from src.persistance.checkpointer import (
@@ -9,25 +11,26 @@ from src.persistance.checkpointer import (
     get_conversation_state,
 )
 
+load_dotenv()  # picks up .env locally; no-op in production
+
 st.set_page_config(page_title="Research Agent", layout="wide")
 
 
-# ── Cached resources ──────────────────────────────────────────
-@st.cache_resource
-def load_graph():
-    return create_graph_with_persistence()
-
+# ── Cached resources (keyed by api keys so each user gets their own graph) ──
 @st.cache_resource
 def load_checkpointer():
     return get_checkpointer()
 
+@st.cache_resource(show_spinner=False)
+def load_graph(groq_key: str, tavily_key: str):
+    """One compiled graph per unique (groq_key, tavily_key) pair."""
+    return create_graph_with_persistence(
+        groq_api_key=groq_key,
+        tavily_api_key=tavily_key,
+    )
 
-with st.spinner("Starting up agent (one-time load)..."):
-    graph = load_graph()
-    checkpointer = load_checkpointer()
 
-
-# ── Session state ─────────────────────────────────────────────
+# ── Session state defaults ────────────────────────────────────
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 
@@ -36,7 +39,7 @@ if "display_messages" not in st.session_state:
 
 
 # ── Load thread history from SQLite ───────────────────────────
-def load_thread_history(thread_id: str):
+def load_thread_history(thread_id: str, checkpointer):
     st.session_state.display_messages = []
     state = get_conversation_state(thread_id, checkpointer)
     if not state:
@@ -57,56 +60,101 @@ def load_thread_history(thread_id: str):
             )
 
 
-if not st.session_state.display_messages:
-    load_thread_history(st.session_state.thread_id)
-
-
 # ── SIDEBAR ───────────────────────────────────────────────────
 with st.sidebar:
     st.title("🔬 Research Agent")
     st.caption("Powered by LangGraph + Groq")
     st.divider()
 
-    if st.button("➕ New Conversation", use_container_width=True, type="primary"):
-        st.session_state.thread_id = str(uuid.uuid4())
-        st.session_state.display_messages = []
-        st.rerun()   # ← rerun is fine HERE because it's inside a button click
+    # ── API Key inputs ────────────────────────────────────────
+    st.subheader("🔑 API Keys")
+    st.caption(
+        "Locally these are loaded from your `.env` automatically. "
+        "On the deployed app, paste your own keys here — they are never stored."
+    )
+
+    groq_key = st.text_input(
+        "Groq API Key",
+        value=os.getenv("GROQ_API_KEY", ""),
+        type="password",
+        placeholder="gsk_...",
+        help="Free key at console.groq.com",
+    )
+    tavily_key = st.text_input(
+        "Tavily API Key",
+        value=os.getenv("TAVILY_API_KEY", ""),
+        type="password",
+        placeholder="tvly-...",
+        help="Free key at tavily.com",
+    )
+
+    keys_ok = bool(groq_key and tavily_key)
 
     st.divider()
-    st.subheader("Past Conversations")
 
-    threads = list_all_threads(checkpointer)
+    # Only show conversation controls when keys are present
+    if keys_ok:
+        if st.button("➕ New Conversation", use_container_width=True, type="primary"):
+            st.session_state.thread_id = str(uuid.uuid4())
+            st.session_state.display_messages = []
+            st.rerun()
 
-    if not threads:
-        st.caption("No past conversations yet.")
-    else:
-        for thread in threads:
-            tid = thread["thread_id"]
-            short_id = tid[-8:]
-            is_active = tid == st.session_state.thread_id
+        st.divider()
+        st.subheader("Past Conversations")
 
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                label = f"{'▶ ' if is_active else ''}...{short_id}"
-                if st.button(label, key=f"switch_{tid}", use_container_width=True):
-                    st.session_state.thread_id = tid
-                    load_thread_history(tid)
-                    st.rerun()
-            with col2:
-                if st.button("🗑", key=f"del_{tid}", help="Delete this conversation"):
-                    clear_thread(tid, checkpointer)
-                    if st.session_state.thread_id == tid:
-                        st.session_state.thread_id = str(uuid.uuid4())
-                        st.session_state.display_messages = []
-                    st.rerun()
+        checkpointer = load_checkpointer()
+        threads = list_all_threads(checkpointer)
 
-    st.divider()
-    st.caption(f"Active: ...{st.session_state.thread_id[-8:]}")
+        if not threads:
+            st.caption("No past conversations yet.")
+        else:
+            for thread in threads:
+                tid = thread["thread_id"]
+                short_id = tid[-8:]
+                is_active = tid == st.session_state.thread_id
+
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    label = f"{'▶ ' if is_active else ''}...{short_id}"
+                    if st.button(label, key=f"switch_{tid}", use_container_width=True):
+                        st.session_state.thread_id = tid
+                        load_thread_history(tid, checkpointer)
+                        st.rerun()
+                with col2:
+                    if st.button("🗑", key=f"del_{tid}", help="Delete this conversation"):
+                        clear_thread(tid, checkpointer)
+                        if st.session_state.thread_id == tid:
+                            st.session_state.thread_id = str(uuid.uuid4())
+                            st.session_state.display_messages = []
+                        st.rerun()
+
+        st.divider()
+        st.caption(f"Active: ...{st.session_state.thread_id[-8:]}")
 
 
 # ── MAIN CHAT AREA ────────────────────────────────────────────
 st.title("Research Assistant")
 
+if not keys_ok:
+    st.warning(
+        "⬅ Enter your **Groq** and **Tavily** API keys in the sidebar to start chatting.\n\n"
+        "- **Groq** (free): [console.groq.com](https://console.groq.com)\n"
+        "- **Tavily** (free tier): [tavily.com](https://tavily.com)"
+    )
+    st.stop()   # stop only when keys are genuinely missing (never happens locally with .env)
+
+
+# Keys are present — lazy-initialize resources
+checkpointer = load_checkpointer()
+
+with st.spinner("Loading agent..."):
+    graph = load_graph(groq_key, tavily_key)
+
+# Load history for the active thread on first visit
+if not st.session_state.display_messages:
+    load_thread_history(st.session_state.thread_id, checkpointer)
+
+# Render existing messages
 for entry in st.session_state.display_messages:
     with st.chat_message(entry["role"]):
         if entry.get("tool_info"):
