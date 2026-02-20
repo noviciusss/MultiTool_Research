@@ -115,24 +115,39 @@ def create_graph():
         get_wikipedia_tool(),
         calculator
     ]
-    graph = StateGraph(AgentState)
+    graph_builder = StateGraph(AgentState)
     
-    graph.add_node('agent',create_agent_node(tools))
+    graph_builder.add_node('agent', create_agent_node(tools))
     #ToolNOde automatically executes tools 
-    graph.add_node("tools",ToolNode(tools)) ## This node will execute any tool calls in the agent's last message and returns ToolMessage with results  
+    graph_builder.add_node("tools", ToolNode(tools)) ## This node will execute any tool calls in the agent's last message and returns ToolMessage with results  
     
-    graph.add_edge(START,'agent')
-    graph.add_conditional_edges(
-        "agent",
-        should_continue,
-        {
-            "tools":"tools",
-            "end":END
-        }
-    )
-    graph.add_edge('tools','agent')
+    graph_builder.add_edge(START, 'agent')
+    graph_builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
+    graph_builder.add_edge('tools', 'agent')
     
-    return graph.compile()
+    return graph_builder.compile()
+
+# ==================== Create Graph with Persistence =====================
+
+def create_graph_with_persistence(db_path: str = "data/checkpoints.db"):
+    """Create agent graph with SQLite persistence enabled."""
+    from src.persistance.checkpointer import get_checkpointer
+    from src.tools.tavily_tool import get_tavily_tool
+    from src.tools.arxiv_tool import get_arxiv_tool
+    from src.tools.wikipedia_tool import get_wikipedia_tool
+    from src.tools.calculator_tool import calculator
+    
+    tools = [get_tavily_tool(), get_arxiv_tool(), get_wikipedia_tool(), calculator]
+    graph_builder = StateGraph(AgentState)
+    
+    graph_builder.add_node('agent', create_agent_node(tools))
+    graph_builder.add_node("tools", ToolNode(tools))
+    graph_builder.add_edge(START, 'agent')
+    graph_builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
+    graph_builder.add_edge('tools', 'agent')
+    
+    checkpointer = get_checkpointer(db_path)
+    return graph_builder.compile(checkpointer=checkpointer)
 
 
 # ====================Test function ===========
@@ -161,4 +176,31 @@ if __name__ == "__main__":
             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                 print(f"  🔧 Tool calls: {[tc['name'] for tc in msg.tool_calls]}")
     print("\n" + "=" * 60)
+
+    # Test with persistence
+    print("\nTesting Agent with Persistence\n" + "="*60)
     
+    # Use same thread_id to test resume (change this to test new conversation)
+    thread_id = "test_conversation_1"  # Hardcode to test resume
+    # thread_id = str(uuid.uuid4())    # Uncomment for new conversation
+    
+    print(f"Thread ID: {thread_id}\n")
+    
+    graph = create_graph_with_persistence()
+    config = {"configurable": {"thread_id": thread_id}}
+    
+    query = "What is the square root of 144?"
+    print(f"Query: {query}\n")
+    
+    for event in graph.stream(
+        {"messages": [("user", query)]},
+        config,
+        stream_mode="values"
+    ):
+        if "messages" in event:
+            msg = event["messages"][-1]
+            if hasattr(msg, 'type') and msg.type == "ai" and msg.content:
+                print(f"Assistant: {msg.content}\n")
+    
+    print("="*60)
+    print(f"✅ Conversation saved! Run again with same thread_id to resume.")

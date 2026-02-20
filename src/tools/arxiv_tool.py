@@ -1,56 +1,77 @@
-# from langchain_community.retrievers import ArxivRetriever
-# def get_arxiv_tool():
-#     '''
-#     Create an arxiv query tool using langchain's ArxivAPIWrapper
-#     return : ArxivQueryRun: configured arxiv search tool
-#     '''
-#     arxiv_wrapper = ArxivRetriever(
-#         top_k_results=3,  # Limit to top 3 results for relevance
-#         doc_content_chars_max=1000 #limit content length 
-#     )
-#     return arxiv_wrapper
+# ==================Why not use ArxivRetriever directly?====================
+# ArxivRetriever returns List[Document] — LLM can't read that directly.
+# Our custom wrapper returns a plain string the LLM understands.
+# ArxivQueryRun from langchain_community has a bug in some versions where
+# top_k_results isn't forwarded to the API call (sends max_results=100 instead),
+# triggering HTTP 429 rate limits. We bypass this by calling arxiv directly.
+# =========================================================================
 
-# if __name__ == "__main__":
-#     tool = get_arxiv_tool()
-#     result = tool.invoke("quantum computing error correction")
-#     print("Arxiv Search Results:")
-#     print(result)
-
-#==================Why not use ArxivRetriever directly?====================
-
-# The ArxivRetriever is designed for retrieval tasks and may not fit seamlessly into the tool-based architecture of our agent.
-# By wrapping it in an ArxivQueryRun, we can ensure that it behaves like a tool, allowing the agent to invoke it as needed and handle its outputs in a consistent manner with other tools. 
-# This abstraction also allows us to easily modify or enhance the arXiv search functionality in the future without affecting the rest of the agent's architecture.
-
-#Return List[Document] but tool aspects str 
-#Use retrival in Rag pipelines and best for vector DB and LLm cannot read it directly but with wrapper we can use it as a tool and agent can read the results and use it in its reasoning process.
-# ===================== ArXiv Tool =====================
+import arxiv
+import time
+from langchain_core.tools import tool
 
 
-from langchain_community.tools import ArxivQueryRun
-from langchain_community.utilities import ArxivAPIWrapper
+@tool
+def arxiv_search(query: str) -> str:
+    """
+    Search ArXiv for academic papers on a topic.
+    Use for: scientific research, academic papers, technical topics.
+
+    Args:
+        query: Search query string (e.g. "small language models 2024")
+
+    Returns:
+        Formatted string with paper titles, authors, and summaries.
+    """
+    try:
+        client = arxiv.Client(
+            page_size=2,        # Only fetch 2 from API — prevents 429
+            delay_seconds=3,    # Polite delay between retries
+            num_retries=1,      # Don't hammer the API on failure
+        )
+
+        search = arxiv.Search(
+            query=query,
+            max_results=2,      # Explicitly cap at 2
+            sort_by=arxiv.SortCriterion.Relevance,
+        )
+
+        results = []
+        for paper in client.results(search):
+            summary = paper.summary.replace("\n", " ")
+            if len(summary) > 600:
+                summary = summary[:600] + "..."
+
+            results.append(
+                f"Title: {paper.title}\n"
+                f"Authors: {', '.join(a.name for a in paper.authors[:3])}\n"
+                f"Published: {paper.published.strftime('%Y-%m-%d')}\n"
+                f"Summary: {summary}\n"
+                f"URL: {paper.entry_id}\n"
+            )
+
+        if not results:
+            return "No papers found for this query. Try different keywords."
+
+        return "\n---\n".join(results)
+
+    except arxiv.HTTPError as e:
+        if "429" in str(e):
+            return (
+                "ArXiv is rate limiting requests right now (too many requests). "
+                "Try again in 30 seconds, or use a more specific query."
+            )
+        return f"ArXiv API error: {str(e)}"
+
+    except Exception as e:
+        return f"Could not fetch ArXiv results: {str(e)}"
 
 
 def get_arxiv_tool():
-    """
-    Create ArXiv paper search tool.
-    
-    Returns:
-        ArxivQueryRun: Configured arXiv search tool
-    """
-    arxiv_wrapper = ArxivAPIWrapper(
-        top_k_results=3,  # Return top 3 papers
-        doc_content_chars_max=1500, # Limit content length
-        load_all_available_meta=False
-    )
-    #Wrap in ArxivQueryRun (formats for llm)
-    return ArxivQueryRun(api_wrapper=arxiv_wrapper)
+    """Return the arxiv_search tool for use in the agent."""
+    return arxiv_search
 
 
-# Test this tool independently
 if __name__ == "__main__":
-    tool = get_arxiv_tool()
-    result = tool.invoke("Quantum Entanglement")
-    print("ArXiv Search Results:")
+    result = arxiv_search.invoke("small language models efficiency")
     print(result)
-    
