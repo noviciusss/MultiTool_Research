@@ -1,7 +1,12 @@
 import os
+import sys
 import streamlit as st
 import uuid
 from dotenv import load_dotenv
+
+# Ensure the repo root is on sys.path so `src` is importable
+# (needed on Streamlit Cloud where cwd is the repo root but it isn't on the path)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.agent.graph import create_graph_with_persistence
 from src.persistance.checkpointer import (
